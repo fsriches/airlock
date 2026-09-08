@@ -162,7 +162,7 @@ def _local_callback_handler(port: int):
             uvicorn.Config(_app, host="127.0.0.1", port=port, log_level="error")
         )
         task = asyncio.create_task(server.serve())
-        for _ in range(3000):  # about 5 minutes at 0.1s
+        for _ in range(72000):  # 2 hours at 0.1s — owner may need time to set up tunnel
             await asyncio.sleep(0.1)
             if "code" in result:
                 break
