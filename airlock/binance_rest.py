@@ -1,4 +1,4 @@
-"""AIRLOCK Binance Spot Testnet gateway (testnet.binance.vision).
+"""AIRLOCK Binance Spot gateway (testnet.binance.vision default, mainnet opt-in).
 
 Drop-in backend for the 6-chamber roadtone engine. Exposes the same
 `call(tool_name, params) -> {"ok": bool, "result": ...}` surface as
@@ -37,10 +37,33 @@ from typing import Any
 TESTNET_BASE = os.environ.get(
     "AIRLOCK_TESTNET_BASE", "https://testnet.binance.vision"
 )
+MAINNET_BASE = os.environ.get("AIRLOCK_MAINNET_BASE", "https://api.binance.com")
 STATE_DIR = Path(os.environ.get("AIRLOCK_HOME", str(Path.home() / ".airlock")))
 KEYS_PATH = STATE_DIR / "binance_testnet.json"
 RECV_WINDOW_MS = 5000
 REQUEST_TIMEOUT_S = 15
+
+
+def resolve_env() -> dict:
+    """Resolve AIRLOCK_ENV -> backend spec (base URL, key file, env-var names).
+
+    testnet (default): testnet.binance.vision, binance_testnet.json
+    mainnet:           api.binance.com,          binance_mainnet.json
+    EXECUTE/KILL on mainnet additionally require AIRLOCK_I_UNDERSTAND_MAINNET=1
+    (enforced in chambers.py — see docs/MAINNET.md).
+    """
+    env = os.environ.get("AIRLOCK_ENV", "testnet").strip().lower()
+    if env == "mainnet":
+        return {"env": "mainnet", "base": MAINNET_BASE,
+                "key_file": STATE_DIR / "binance_mainnet.json",
+                "key_env": "AIRLOCK_BINANCE_MAINNET_KEY",
+                "secret_env": "AIRLOCK_BINANCE_MAINNET_SECRET"}
+    if env == "testnet":
+        return {"env": "testnet", "base": TESTNET_BASE,
+                "key_file": KEYS_PATH,
+                "key_env": "AIRLOCK_BINANCE_TESTNET_KEY",
+                "secret_env": "AIRLOCK_BINANCE_TESTNET_SECRET"}
+    raise RuntimeError(f"AIRLOCK_ENV must be 'testnet' or 'mainnet', got {env!r}")
 
 # tool hint -> (http method, path, signed?)
 TOOL_MAP: dict[str, tuple[str, str, bool]] = {
@@ -48,6 +71,7 @@ TOOL_MAP: dict[str, tuple[str, str, bool]] = {
     "ticker": ("GET", "/api/v3/ticker/24hr", False),
     "price": ("GET", "/api/v3/ticker/price", False),
     "account": ("GET", "/api/v3/account", True),
+    "apirestrictions": ("GET", "/sapi/v1/account/apiRestrictions", True),
     "order": ("POST", "/api/v3/order", True),
     "order_test": ("POST", "/api/v3/order/test", True),
     "cancel": ("DELETE", "/api/v3/order", True),
@@ -73,8 +97,19 @@ def resolve_tool(hint: str) -> tuple[str, str, bool]:
 class BinanceRestClient:
     """HMAC-SHA256 signed REST client with MCP-shaped responses."""
 
-    def __init__(self, base: str = TESTNET_BASE, key: str | None = None,
+    def __init__(self, base: str | None = None, key: str | None = None,
                  secret: str | None = None) -> None:
+        if base is None:
+            spec = resolve_env()
+            self.env = spec["env"]
+            self.key_file = spec["key_file"]
+            self._key_env, self._secret_env = spec["key_env"], spec["secret_env"]
+            base = spec["base"]
+        else:
+            self.env = "mainnet" if "binance.com" in base and "testnet" not in base else "testnet"
+            self.key_file = KEYS_PATH
+            self._key_env = "AIRLOCK_BINANCE_TESTNET_KEY"
+            self._secret_env = "AIRLOCK_BINANCE_TESTNET_SECRET"
         self.base = base.rstrip("/")
         self._time_offset_ms = 0
         self.key, self.secret = key, secret
@@ -82,18 +117,17 @@ class BinanceRestClient:
             self.key, self.secret = self._load_creds()
 
     # ---- credentials ----
-    @staticmethod
-    def _load_creds() -> tuple[str | None, str | None]:
-        k = os.environ.get("AIRLOCK_BINANCE_TESTNET_KEY")
-        s = os.environ.get("AIRLOCK_BINANCE_TESTNET_SECRET")
+    def _load_creds(self) -> tuple[str | None, str | None]:
+        k = os.environ.get(self._key_env)
+        s = os.environ.get(self._secret_env)
         if k and s:
             return k, s
-        if KEYS_PATH.exists():
+        if self.key_file.exists():
             try:
-                d = json.loads(KEYS_PATH.read_text())
+                d = json.loads(self.key_file.read_text())
                 return d.get("key"), d.get("secret")
             except Exception as e:  # noqa: BLE001
-                raise RuntimeError(f"testnet keys file unreadable: {e}") from e
+                raise RuntimeError(f"{self.env} keys file unreadable: {e}") from e
         return None, None
 
     @property
@@ -118,8 +152,8 @@ class BinanceRestClient:
         if signed:
             if not self.has_keys:
                 return {"ok": False, "error": (
-                    "no testnet credentials — set AIRLOCK_BINANCE_TESTNET_KEY/"
-                    "SECRET env or write " + str(KEYS_PATH))}
+                    f"no {self.env} credentials — set {self._key_env}/"
+                    f"{self._secret_env} env or write " + str(self.key_file))}
             q["timestamp"] = str(int(time.time() * 1000) + self._time_offset_ms)
             q["recvWindow"] = str(RECV_WINDOW_MS)
             query = urllib.parse.urlencode(q)

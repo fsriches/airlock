@@ -40,7 +40,7 @@ def main() -> int:
     p_yes.add_argument("hash", nargs="?", default=None)
     p_yes.add_argument("--yesfile", default=None, help=argparse.SUPPRESS)
     p_no = sub.add_parser("no", help="discard pending intent")
-    sub.add_parser("execute", help="chamber 4 EXECUTE (testnet only)")
+    sub.add_parser("execute", help="chamber 4 EXECUTE (env-gated: testnet default; mainnet needs opt-ins)")
     sub.add_parser("reconcile", help="chamber 5 RECONCILE: MATCH / NO_TRADE / DEVIATION")
     sub.add_parser("kill", help="chamber 6 KILL: cancel all + flatten to USDT")
     sub.add_parser("verify", help="recompute ledger hash chain")
@@ -50,7 +50,10 @@ def main() -> int:
     try:
         if args.cmd == "check":
             client, policy = _client_and_policy()
-            _print("1 EVIDENCE", ch_evidence(client, policy, conn))
+            ev = ch_evidence(client, policy, conn)
+            _print("1 EVIDENCE", ev)
+            if ev.get("refuse"):
+                return 1
         elif args.cmd == "intent":
             client, policy = _client_and_policy()
             rec = ch_mandate(conn, " ".join(args.text))

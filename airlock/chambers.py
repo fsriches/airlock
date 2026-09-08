@@ -22,12 +22,17 @@ from typing import Any
 
 import yaml
 
-from .binance_rest import BinanceRestClient, TESTNET_BASE
+from .binance_rest import BinanceRestClient, TESTNET_BASE, resolve_env
 
 ROOT = Path(__file__).resolve().parent.parent
-POLICY_PATH = ROOT / "policy.yaml"
+POLICY_PATH = Path(os.environ.get("AIRLOCK_POLICY") or (ROOT / "policy.yaml"))
 LEDGER = Path(os.environ.get("AIRLOCK_HOME", str(Path.home() / ".airlock"))) / "roadtone_ledger.sqlite3"
 KILL_PREFIX = "AIR-KILL-"
+
+
+def _current_env() -> str:
+    e = os.environ.get("AIRLOCK_ENV", "testnet").strip().lower()
+    return e if e in ("testnet", "mainnet") else "testnet"
 
 
 # ---------------- ledger (WAL + hash chain) ----------------
@@ -40,8 +45,13 @@ def db() -> sqlite3.Connection:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS events (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts REAL, chamber TEXT, kind TEXT, payload TEXT, prev_hash TEXT, hash TEXT)"""
+        ts REAL, chamber TEXT, kind TEXT, payload TEXT, prev_hash TEXT, hash TEXT,
+        env TEXT NOT NULL DEFAULT 'testnet')"""
     )
+    # migration for ledgers created before env tagging (docs/MAINNET.md)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if "env" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN env TEXT NOT NULL DEFAULT 'testnet'")
     conn.execute("CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)")
     return conn
 
@@ -56,8 +66,8 @@ def emit(conn: sqlite3.Connection, chamber: str, kind: str, payload: dict) -> st
     blob = json.dumps(payload, sort_keys=True, default=str)
     h = hashlib.sha256((ph + blob).encode()).hexdigest()
     conn.execute(
-        "INSERT INTO events (ts,chamber,kind,payload,prev_hash,hash) VALUES (?,?,?,?,?,?)",
-        (time.time(), chamber, kind, blob, ph, h),
+        "INSERT INTO events (ts,chamber,kind,payload,prev_hash,hash,env) VALUES (?,?,?,?,?,?,?)",
+        (time.time(), chamber, kind, blob, ph, h, _current_env()),
     )
     return h
 
@@ -155,10 +165,30 @@ def client_order_id(intent_hash_hex: str, kind: str = "ORDER") -> str:
 
 # ---------------- Chamber 1: EVIDENCE ----------------
 def ch_evidence(client: BinanceRestClient, policy: Policy, conn: sqlite3.Connection) -> dict:
+    env = _current_env()
     out: dict = {"chamber": "1-EVIDENCE", "backend": client.base,
                  "keys": "PRESENT" if client.has_keys else "ABSENT",
                  "policyFp": policy.fingerprint, "mode": policy.mode,
-                 "env": policy.environment}
+                 "env": env}
+    # key permission check (docs/MAINNET.md): refuse a withdrawal-enabled key
+    if client.has_keys:
+        ar = client.call("apiRestrictions")
+        if ar.get("ok"):
+            a = ar["result"]["content"][0]
+            perms = {"enableWithdrawals": a.get("enableWithdrawals"),
+                     "enableInternalTransfer": a.get("enableInternalTransfer"),
+                     "enableFutures": a.get("enableFutures"),
+                     "enableMargin": a.get("enableMargin"),
+                     "ipRestricted": a.get("ipRestrict")}
+            out["keyPermissions"] = perms
+            if a.get("enableWithdrawals"):
+                out["refuse"] = True
+                out["refuseReason"] = ("key has enableWithdrawals=true — delete it and create a "
+                                       "trading-only key (docs/MAINNET.md step 2)")
+                emit(conn, "EVIDENCE", "check", out)
+                return out
+        else:
+            out["keyPermissionsErr"] = str(ar.get("error"))[:120]
     r = client.call("time")
     out["serverTimeOk"] = bool(r.get("ok"))
     if out["keys"]:
@@ -324,6 +354,23 @@ def _floor_step(value: float, step: float) -> str:
     return f"{floored:.8f}".rstrip("0")
 
 
+def _env_gate(client: BinanceRestClient, policy: Policy) -> tuple[bool, str]:
+    """docs/MAINNET.md: allow when AIRLOCK_ENV==testnet (testnet backend), or when
+    on mainnet (AIRLOCK_ENV==mainnet OR mainnet backend) AND
+    AIRLOCK_I_UNDERSTAND_MAINNET==1; otherwise refuse (fail-closed)."""
+    env = _current_env()
+    on_mainnet = env == "mainnet" or client.base != TESTNET_BASE
+    if on_mainnet:
+        if os.environ.get("AIRLOCK_I_UNDERSTAND_MAINNET", "") == "1":
+            return True, ""
+        return False, ("refused: mainnet requires AIRLOCK_I_UNDERSTAND_MAINNET=1 "
+                       "(docs/MAINNET.md step 5)")
+    if client.base == TESTNET_BASE and policy.environment == "testnet":
+        return True, ""
+    return False, (f"refused: AIRLOCK_ENV={env} with backend={client.base} "
+                   f"policy.environment={policy.environment} — testnet only")
+
+
 # ---------------- Chamber 4: EXECUTE ----------------
 def ch_execute(client: BinanceRestClient, policy: Policy, conn: sqlite3.Connection) -> dict:
     out: dict = {"chamber": "4-EXECUTE"}
@@ -346,8 +393,9 @@ def ch_execute(client: BinanceRestClient, policy: Policy, conn: sqlite3.Connecti
                 out.update(sent=False, reason="already open (idempotent skip)", clientOrderId=cid, orderId=o["orderId"])
                 emit(conn, "EXECUTE", "ORDER", out)
                 return out
-    if client.base != TESTNET_BASE or policy.environment != "testnet":
-        out.update(sent=False, reason="EXECUTE allowed on testnet only (policy.environment)")
+    allowed, gate_reason = _env_gate(client, policy)
+    if not allowed:
+        out.update(sent=False, reason=gate_reason)
         emit(conn, "EXECUTE", "ORDER", out)
         return out
     params: dict[str, Any] = {"symbol": intent["symbol"], "side": intent["side"],
@@ -463,6 +511,11 @@ def _airlock_positions(conn: sqlite3.Connection) -> dict[str, float]:
 def ch_kill(client: BinanceRestClient, policy: Policy, conn: sqlite3.Connection) -> dict:
     out: dict = {"chamber": "6-KILL", "scope": "ledger-owned positions only (operator faucet funds untouched)",
                  "before": {}, "after": {}}
+    allowed, gate_reason = _env_gate(client, policy)
+    if not allowed:
+        out.update(refused=True, reason=gate_reason)
+        emit(conn, "KILL", "FLATTEN", out)
+        return out
     acc = client.call("account")
     if not acc.get("ok"):
         out["error"] = f"account: {acc.get('error')}"
@@ -519,16 +572,20 @@ def ch_kill(client: BinanceRestClient, policy: Policy, conn: sqlite3.Connection)
 
 # ---------------- verify ----------------
 def verify_ledger(conn: sqlite3.Connection) -> dict:
-    rows = conn.execute("SELECT seq,ts,chamber,kind,payload,prev_hash,hash FROM events ORDER BY seq").fetchall()
+    rows = conn.execute("SELECT seq,ts,chamber,kind,payload,prev_hash,hash,env FROM events ORDER BY seq").fetchall()
     prev = "GENESIS"
     bad = 0
     counts: dict[str, int] = {}
-    for seq, ts, chamber, kind, payload, prev_h, h in rows:
+    envs: dict[str, int] = {}
+    for seq, ts, chamber, kind, payload, prev_h, h, env in rows:
         if prev_h != prev or hashlib.sha256((prev_h + payload).encode()).hexdigest() != h:
             bad += 1
         prev = h
         counts[chamber] = counts.get(chamber, 0) + 1
-    return {"events": len(rows), "chainBroken": bad, "chamberCounts": counts}
+        envs[env or "testnet"] = envs.get(env or "testnet", 0) + 1
+    return {"events": len(rows), "chainBroken": bad, "chamberCounts": counts,
+            "environments": envs,
+            "chainEnvironment": (next(iter(envs)) if len(envs) == 1 and envs else "mixed")}
 
 
 def ch_verify(conn: sqlite3.Connection) -> dict:

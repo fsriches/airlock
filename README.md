@@ -1,6 +1,7 @@
 # Airlock — 6-Chamber Execution Guardrail for Binance Agent OS
 
 Live page: https://fsriches.github.io/airlock/
+Mainnet: see [docs/MAINNET.md](docs/MAINNET.md) — env switch, opt-in gate, key-permission check.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
