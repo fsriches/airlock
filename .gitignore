@@ -1,0 +1,9 @@
+.env
+.airlock/
+*.jsonl
+*.sqlite
+*.pem
+__pycache__/
+*.egg-info/
+.venv/
+docs/evidence/
