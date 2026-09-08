@@ -19,6 +19,7 @@ import datetime as dt
 import fnmatch
 import hashlib
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -411,7 +412,17 @@ def main() -> int:
 
     conn = db()
     client: AirlockMcpClient | None = None
-    if TOKEN_PATH.exists():
+    backend = os.environ.get("AIRLOCK_BACKEND", "mcp").strip().lower()
+    if backend == "rest":
+        # Spot Testnet gateway — no OAuth, HMAC keys from ~/.airlock/binance_testnet.json
+        from .binance_rest import BinanceRestClient
+
+        rest = BinanceRestClient()
+        print(f"backend=rest ({rest.base})  keys={'PRESENT' if rest.has_keys else 'ABSENT (signed calls will fail loud)'}")
+        if rest.has_keys:
+            rest.sync_time()
+        client = rest  # same .call() surface as AirlockMcpClient
+    elif TOKEN_PATH.exists():
         try:
             import asyncio
 
