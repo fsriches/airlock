@@ -1,21 +1,22 @@
-# AIRLOCK ROADTONE — deterministic policy (single source of truth)
-# Loader fails loud if this file is missing/malformed. No silent fallback.
-mode: observe            # observe | ask | autopilot   (autopilot needs explicit --autopilot flag too)
-dry_run: true            # true = never send write tools upstream; journal sim results only
+# AIRLOCK — deterministic policy (single source of truth, fail-loud loader)
+mode: gated              # gated = every write needs typed operator approval (LOCK)
+environment: testnet     # EXECUTE allowed on testnet ONLY; mainnet requires explicit change + review
+dry_run: false           # LOCK gate decides; EXECUTE honors environment
 
 symbols:
-  allow: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
-  block: ["*UP*", "*DOWN*", "*BULL*", "*BEAR*"]   # leveraged tokens never allowed
+  allow: ["BNBUSDT", "BTCUSDT", "ETHUSDT"]
+  block: ["*UP*", "*DOWN*", "*BULL*", "*BEAR*"]
 
 limits:
-  max_order_notional_usdt: 50
-  max_gross_exposure_usdt: 200
-  daily_loss_pct: 2.0          # drawdown from persisted day-peak equity; breach -> flatten+halt
+  max_order_notional_usdt: 15
+  max_gross_exposure_usdt: 20
+  daily_loss_pct: 2.0
   max_open_orders: 5
   max_orders_per_5m: 10
-  min_quote_balance_usdt: 10   # stop opening if free USDT below this
+  min_quote_balance_usdt: 10
+  fill_tolerance_pct: 5.0
 
 risk:
-  stop_loss_pct: 3.0           # per-position mark-vs-entry hard stop
+  stop_loss_pct: 3.0
   take_profit_pct: 6.0
   reduce_only_always_allowed: true

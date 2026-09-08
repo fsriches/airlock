@@ -104,7 +104,7 @@ class BinanceRestClient:
     def sync_time(self) -> dict:
         srv = self.call("time")
         if srv.get("ok"):
-            server_ms = srv["result"]["serverTime"]
+            server_ms = srv["result"]["content"][0]["serverTime"]
             self._time_offset_ms = server_ms - int(time.time() * 1000)
         return {"offsetMs": self._time_offset_ms}
 
