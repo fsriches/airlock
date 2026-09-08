@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airlock: every trade passes six chambers</title>
+<meta name="description" content="Airlock is a six-chamber execution guardrail for Binance Agent OS. Evidence, mandate, hashed lock with typed approval, idempotent execute, reconcile, kill switch. Open source, MIT.">
+<meta property="og:title" content="Airlock: every trade passes six chambers">
+<meta property="og:description" content="A six-chamber execution guardrail for Binance Agent OS. Live demo on Binance Spot Testnet.">
+<meta property="og:image" content="https://cdn.jsdelivr.net/gh/fsriches/airlock@main/demo/airlock.gif">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#141414; --line:#2a2a2a;
+    --gold:#f0b90b; --gold-dim:#8a6a06; --gold-soft:rgba(240,185,11,.14);
+    --text:#f4f4f2; --muted:#a3a39c;
+    --ok:#3ddc84; --no:#ff5c5c; --warn:#ffc857;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"Space Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:17px;line-height:1.55}
+  a{color:var(--gold);text-decoration:none}
+  a:hover,a:focus-visible{text-decoration:underline;text-underline-offset:3px}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* top bar */
+  .top{display:flex;justify-content:space-between;align-items:center;padding:22px 0;font-size:15px;color:var(--muted)}
+  .top strong{color:var(--gold);letter-spacing:.06em;font-weight:700}
+  .top a{color:var(--muted)}
+
+  /* hero */
+  .hero{padding:56px 0 24px}
+  h1{font-size:clamp(2.2rem,5.6vw,4.4rem);line-height:1.02;letter-spacing:-.02em;margin:0 0 20px;font-weight:700;max-width:14ch}
+  .lede{font-size:1.15rem;color:var(--muted);max-width:56ch;margin:0 0 28px}
+  .actions{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:56px}
+  .btn{display:inline-block;padding:12px 18px;border:1px solid var(--gold);border-radius:8px;color:var(--gold);font-weight:500}
+  .btn.primary{background:var(--gold);color:#111}
+  .btn.primary:hover{text-decoration:none;filter:brightness(1.08)}
+
+  /* the airlock diagram: the one memorable element */
+  .airlock{position:relative;border:1px solid var(--gold-dim);border-radius:14px;background:linear-gradient(180deg,#121212,#0e0e0e);padding:30px 22px 22px;overflow:hidden}
+  .airlock .track{position:relative;display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+  .chamber{position:relative;border:1px solid var(--line);border-radius:10px;padding:14px 12px 12px;background:#101010;min-height:118px}
+  .chamber .name{font-family:var(--mono);font-size:.78rem;letter-spacing:.08em;color:var(--gold);margin-bottom:6px}
+  .chamber .what{font-size:.86rem;color:var(--muted);line-height:1.35}
+  .chamber .verdict{position:absolute;right:10px;top:10px;font-family:var(--mono);font-size:.7rem;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .chamber.lit{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-soft)}
+  .chamber.lit .verdict{border-color:var(--ok);color:var(--ok)}
+  .chamber.lit .verdict.no{border-color:var(--no);color:var(--no)}
+  .rail{position:absolute;left:22px;right:22px;top:14px;height:2px;background:var(--line)}
+  .dot{position:absolute;top:9px;left:22px;width:12px;height:12px;border-radius:50%;background:var(--gold);box-shadow:0 0 14px var(--gold)}
+  .intent{font-family:var(--mono);font-size:.82rem;color:var(--muted);margin:14px 0 0}
+  .intent b{color:var(--text);font-weight:500}
+  @media (prefers-reduced-motion:no-preference){
+    .dot.run{animation:travel 4.8s cubic-bezier(.4,0,.2,1) 1 forwards}
+    @keyframes travel{from{left:22px}to{left:calc(100% - 34px)}}
+  }
+  @media (max-width:760px){
+    .airlock .track{grid-template-columns:repeat(2,1fr)}
+    .rail,.dot{display:none}
+  }
+
+  /* sections */
+  section{padding:56px 0 8px}
+  h2{font-size:clamp(1.5rem,3vw,2.1rem);letter-spacing:-.01em;margin:0 0 10px;font-weight:700}
+  .sub{color:var(--muted);max-width:60ch;margin:0 0 26px}
+
+  /* video frame mirrors the poster */
+  .frame{border:1px solid var(--gold);border-radius:14px;padding:10px;background:#0d0d0d}
+  video{display:block;width:100%;height:auto;border-radius:8px;background:#141414}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:.95rem}
+  th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:500}
+  td.mono{font-family:var(--mono);font-size:.85rem}
+  .tag{font-family:var(--mono);font-size:.74rem;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+  .tag.ok{color:var(--ok);border-color:var(--ok)}
+  .tag.no{color:var(--no);border-color:var(--no)}
+  .tag.warn{color:var(--warn);border-color:var(--warn)}
+  .tag.gold{color:var(--gold);border-color:var(--gold)}
+
+  pre{margin:0;background:#0d0d0d;border:1px solid var(--line);border-radius:10px;padding:18px;font-family:var(--mono);font-size:.84rem;line-height:1.6;overflow:auto;color:#e6e6e0}
+  pre .c{color:var(--muted)}
+
+  .two{display:grid;grid-template-columns:1.1fr .9fr;gap:28px;align-items:start}
+  @media (max-width:820px){.two{grid-template-columns:1fr}}
+  .note{border-left:2px solid var(--gold);padding:6px 0 6px 16px;color:var(--muted);font-size:.95rem}
+
+  footer{margin-top:64px;padding:28px 0 48px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><strong>AIRLOCK</strong></div>
+    <div>Binance Agent OS Mini Hackathon, Track A</div>
+  </div>
+
+  <header class="hero">
+    <h1>Every trade passes six chambers.</h1>
+    <p class="lede">Airlock sits between an AI trading agent and Binance. A plain instruction becomes a typed, hashed mandate that a human approves by typing the hash back. Only then is it sent, and every fill is checked against what was approved.</p>
+    <div class="actions">
+      <a class="btn primary" href="#demo">Watch the 45 second demo</a>
+      <a class="btn" href="https://github.com/fsriches/airlock">Open the repo</a>
+    </div>
+
+    <div class="airlock" aria-label="Diagram of the six chambers an intent passes through">
+      <div class="rail" aria-hidden="true"></div>
+      <div class="dot run" aria-hidden="true"></div>
+      <div class="track">
+        <div class="chamber" data-step="1"><div class="name">EVIDENCE</div><div class="what">Read-only snapshot: balances, ticker, exchange filters. Keys never printed.</div><span class="verdict">READY</span></div>
+        <div class="chamber" data-step="2"><div class="name">MANDATE</div><div class="what">Instruction becomes a typed mandate and a SHA-256 approval hash.</div><span class="verdict">HASHED</span></div>
+        <div class="chamber" data-step="3"><div class="name">LOCK</div><div class="what">The operator types the hash back. Wrong hash or policy breach is a deny.</div><span class="verdict">ALLOW</span></div>
+        <div class="chamber" data-step="4"><div class="name">EXECUTE</div><div class="what">Client order id derived from the hash. Retries are idempotent, no double fills.</div><span class="verdict">FILLED</span></div>
+        <div class="chamber" data-step="5"><div class="name">RECONCILE</div><div class="what">Fill compared with the mandate. MATCH, NO_TRADE or DEVIATION.</div><span class="verdict">MATCH</span></div>
+        <div class="chamber" data-step="6"><div class="name">KILL</div><div class="what">Cancel every open order, flatten only what Airlock opened.</div><span class="verdict no">FLAT</span></div>
+      </div>
+      <p class="intent">intent: <b>buy 10 USDT of BNBUSDT market</b> &nbsp; hash: <b>f9f3c61b…c6e00</b></p>
+    </div>
+  </header>
+
+  <section id="demo">
+    <h2>What the demo shows</h2>
+    <p class="sub">One recorded session on Binance Spot Testnet, four scenarios, one ledger. No cuts.</p>
+    <div class="frame">
+      <video controls playsinline preload="metadata" poster="https://cdn.jsdelivr.net/gh/fsriches/airlock@main/demo/airlock.gif">
+        <source src="https://cdn.jsdelivr.net/gh/fsriches/airlock@main/demo/airlock.mp4" type="video/mp4">
+        Your browser cannot play this video. <a href="https://github.com/fsriches/airlock/blob/main/demo/airlock.mp4">Download it from the repo.</a>
+      </video>
+    </div>
+    <table style="margin-top:22px">
+      <thead><tr><th>Scenario</th><th>What happened</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Buy 10 USDT of BNBUSDT, market</td><td class="mono">approval typed, order 4591493 filled, drift 2.24% within tolerance</td><td><span class="tag ok">MATCH</span></td></tr>
+        <tr><td>Limit order 20% below market</td><td class="mono">rests unfilled, reconcile refuses to call it a trade</td><td><span class="tag warn">NO_TRADE</span></td></tr>
+        <tr><td>Buy 50 USDT, above the policy cap</td><td class="mono">stopped at LOCK, nothing sent to the exchange</td><td><span class="tag no">DENY</span></td></tr>
+        <tr><td>Kill switch</td><td class="mono">resting order 13722078 cancelled, 0.013 BNB sold back (order 4592541), faucet balance untouched</td><td><span class="tag no">FLAT</span></td></tr>
+        <tr><td>Ledger audit</td><td class="mono">13 events, hash chain intact</td><td><span class="tag ok">VERIFY OK</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="status">
+    <div class="two">
+      <div>
+        <h2>What is real, what is testnet, what is blocked</h2>
+        <p class="sub">Honest status for judges. Nothing on this page is simulated except the exchange balance.</p>
+        <table>
+          <tbody>
+            <tr><td>Execution through the Binance API (HMAC)</td><td><span class="tag ok">working</span></td><td>Binance Spot Testnet, real matching engine, fake balance</td></tr>
+            <tr><td>Six chambers, ledger, kill switch, 17 offline tests</td><td><span class="tag ok">working</span></td><td>same code on mainnet, only base URL and key change</td></tr>
+            <tr><td>Binance MCP Server adapter (OAuth client metadata flow)</td><td><span class="tag warn">blocked</span></td><td>reaches the authorize page, rejected with error 3346001: self-built agents are not on the client allowlist yet</td></tr>
+            <tr><td>Skills Hub compatible skill</td><td><span class="tag gold">included</span></td><td>skills/binance-airlock/SKILL.md</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h2>Why this exists</h2>
+        <p class="sub">Binance's own docs say agents can hallucinate, act on stale data, or send wrong parameters. Airlock makes those mistakes cheap: a wrong price fails Evidence, an oversize order fails Lock, a bad fill is caught by Reconcile, and one command flattens everything.</p>
+        <p class="note">Airlock never opens risk on its own. Every order that adds exposure comes from an intent that passed all chambers with a human approval bound to its hash. The supported production path is to run Airlock as a sidecar under Claude Code or Codex.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="replicate">
+    <h2>Replicate it in about a minute</h2>
+    <p class="sub">You need Python 3.11 and a free Binance Spot Testnet key (testnet.binance.vision, sign in with GitHub). No real Binance account.</p>
+<pre><span class="c"># get the code</span>
+git clone https://github.com/fsriches/airlock && cd airlock
+pip install -r requirements.txt
+
+<span class="c"># testnet key, never inside the repo</span>
+export AIRLOCK_HOME=$HOME/.airlock
+echo '{"key":"...","secret":"..."}' > $AIRLOCK_HOME/binance_testnet.json && chmod 600 $AIRLOCK_HOME/binance_testnet.json
+
+<span class="c"># the six chambers</span>
+airlock check                                   <span class="c"># EVIDENCE</span>
+airlock intent "buy 10 USDT of BNBUSDT market"  <span class="c"># MANDATE, prints the approval hash</span>
+echo "&lt;hash&gt;" | airlock yes                     <span class="c"># LOCK</span>
+airlock execute                                 <span class="c"># EXECUTE</span>
+airlock reconcile --order-id AIR-ORDER-...      <span class="c"># RECONCILE</span>
+airlock kill                                    <span class="c"># KILL</span>
+airlock verify                                  <span class="c"># ledger hash chain</span></pre>
+  </section>
+
+  <footer>
+    <div>Built on Binance Agent OS. MIT license. <a href="https://github.com/fsriches/airlock">github.com/fsriches/airlock</a></div>
+    <div>Not financial advice. Software can fail. Keep Binance's own emergency stop as the last resort.</div>
+  </footer>
+</div>
+
+<script>
+  // One orchestrated moment: light each chamber as the dot passes it, once.
+  (function(){
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var chambers = document.querySelectorAll('.chamber');
+    if (reduce) { chambers.forEach(function(c){ c.classList.add('lit'); }); return; }
+    chambers.forEach(function(c, i){ setTimeout(function(){ c.classList.add('lit'); }, 500 + i * 760); });
+  })();
+</script>
+</body>
+</html>
